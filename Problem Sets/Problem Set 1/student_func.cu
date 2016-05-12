@@ -36,9 +36,9 @@
 __global__
 void rgba_to_greyscale(const uchar4* const rgbaImage,
                        unsigned char* const greyImage,
-                       int numRows, int numCols)
+                       int numRows, int numCols,
+                       int block_size)
 {
-  //TODO
   //Fill in the kernel to convert from color to greyscale
   //the mapping from components of a uchar4 to RGBA is:
   // .x -> R ; .y -> G ; .z -> B ; .w -> A
@@ -46,20 +46,48 @@ void rgba_to_greyscale(const uchar4* const rgbaImage,
   //The output (greyImage) at each pixel should be the result of
   //applying the formula: output = .299f * R + .587f * G + .114f * B;
   //Note: We will be ignoring the alpha channel for this conversion
+  int bx = blockIdx.x;
+  int by = blockIdx.y;
 
-  //First create a mapping from the 2D block and grid locations
-  //to an absolute 2D location in the image, then use that to
-  //calculate a 1D offset
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+
+  int pixel_x = bx * block_size + tx;
+  int pixel_y = by * block_size + ty;
+
+  if (pixel_x >= numCols || pixel_y >= numRows)
+    return;
+  int pixel_idx = pixel_y * numCols + pixel_x;
+
+  uchar4 rgba = rgbaImage[pixel_idx];
+  greyImage[pixel_idx] = .299f * rgba.x + .587f * rgba.y + .114f * rgba.z;
+}
+
+int round_next_pow2(int x, int min_pow)
+{
+  int l, m, r;
+  l = min_pow - 1;
+  r = 31;
+  while (r - l > 1) {
+    m = (r + l) / 2;
+    if ((1 << m) < x)
+      l = m;
+    else
+      r = m;
+  }
+  return 1 << r;
 }
 
 void your_rgba_to_greyscale(const uchar4 * const h_rgbaImage, uchar4 * const d_rgbaImage,
                             unsigned char* const d_greyImage, size_t numRows, size_t numCols)
 {
-  //You must fill in the correct sizes for the blockSize and gridSize
-  //currently only one block with one thread is being launched
-  const dim3 blockSize(1, 1, 1);  //TODO
-  const dim3 gridSize( 1, 1, 1);  //TODO
-  rgba_to_greyscale<<<gridSize, blockSize>>>(d_rgbaImage, d_greyImage, numRows, numCols);
+  const int block_size = 32;
+  const int block_size_log2 = 5;
+  const dim3 blockSize(block_size, block_size); // 1024 threads per block
+  int numRowsRounded = round_next_pow2(numRows, block_size_log2);
+  int numColsRounded = round_next_pow2(numCols, block_size_log2);
+  const dim3 gridSize(numColsRounded / block_size, numRowsRounded / block_size);
+  rgba_to_greyscale<<<gridSize, blockSize>>>(d_rgbaImage, d_greyImage, numRows, numCols, block_size);
   
   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
